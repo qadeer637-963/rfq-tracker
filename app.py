@@ -141,6 +141,7 @@ else:
         else:
             today_str = datetime.now().strftime("%Y-%m-%d")
             for index, row in active_df.iterrows():
+                row_id = str(row['id'])
                 is_urgent = str(row['last_date']) <= today_str
                 status_badge = "<span class='badge-status' style='background-color: #fef2f2; color: #dc2626;'>🚨 Urgent</span>" if is_urgent else "<span class='badge-status' style='background-color: #e0f2fe; color: #0284c7;'>⚙️ On-Process</span>"
                 
@@ -163,28 +164,30 @@ else:
                         for i, p in enumerate(paths):
                             if os.path.exists(str(p)):
                                 with open(str(p), "rb") as file:
-                                    st.download_button(label=f"📥 Doc {i+1}", data=file, file_name=os.path.basename(str(p)), key=f"dl_{row['id']}_{i}")
+                                    st.download_button(label=f"📥 Doc {i+1}", data=file, file_name=os.path.basename(str(p)), key=f"dl_{row_id}_{i}")
                     else: st.caption("No initial attachments.")
                         
                 with col_actions:
-                    if st.button("📩 Submit Quotation", key=f"sub_panel_{row['id']}", use_container_width=True, type="primary"):
-                        st.session_state[f"show_upload_{row['id']}"] = True
+                    if st.button("📩 Submit Quotation", key=f"sub_panel_{row_id}", use_container_width=True, type="primary"):
+                        st.session_state[f"show_upload_{row_id}"] = True
 
-                if st.session_state.get(f"show_upload_{row['id']}", False):
-                    # ریسیٹ کرنے کے لیے ڈائنامک کی (Key) کا استعمال
-                    uploader_key = f"file_uploader_{row['id']}_{st.session_state.get(f'uploader_version_{row[\"id\"]}', 0)}"
+                if st.session_state.get(f"show_upload_{row_id}", False):
+                    # یہاں اسٹرنگ بالکل صاف کر دی گئی ہے تاکہ سنٹیکس کنفیوژن نہ ہو
+                    current_version = st.session_state.get(f"uploader_version_{row_id}", 0)
+                    uploader_key = f"file_uploader_{row_id}_{current_version}"
+                    
                     q_file = st.file_uploader("Choose final quotation file...", key=uploader_key)
                     
-                    if st.button("Confirm & Save Submission", key=f"conf_sub_{row['id']}", type="primary"):
+                    if st.button("Confirm & Save Submission", key=f"conf_sub_{row_id}", type="primary"):
                         if q_file:
                             q_file_path = os.path.join(UPLOAD_DIR, f"SUBMITTED_{row['rfq_number']}_{q_file.name}")
                             with open(q_file_path, "wb") as f: f.write(q_file.getbuffer())
                             
                             st.success("🎉 Quotation file saved successfully!")
                             
-                            # فائل اپلوڈر کو فوراً صاف کرنے کے لیے ورژن بڑھا دیں
-                            st.session_state[f"uploader_version_{row['id']}"] = st.session_state.get(f"uploader_version_{row['id']}", 0) + 1
-                            st.session_state[f"show_upload_{row['id']}"] = False
+                            # ورژن بڑھا کر اپلوڈر کو ری سیٹ کریں
+                            st.session_state[f"uploader_version_{row_id}"] = current_version + 1
+                            st.session_state[f"show_upload_{row_id}"] = False
                             st.rerun()
                         else:
                             st.error("Please attach a file first before confirming.")
