@@ -3,103 +3,49 @@ import pandas as pd
 from datetime import datetime
 import json
 import os
+import requests
 
-# Page Configuration for Premium Look (Choice A Layout)
+# Page Configuration for Premium Look
 st.set_page_config(page_title="Mohammad Group of Companies - RFQ Tracker", page_icon="📊", layout="wide")
 
 # Custom Premium CSS UI Styling
 st.markdown("""
     <style>
-    /* Main App Background & Fonts */
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    h1, h2, h3 {
-        color: #1e293b !important;
-        font-family: 'Inter', sans-serif;
-        font-weight: 700;
-    }
+    .stApp { background-color: #f8f9fa; }
+    h1, h2, h3 { color: #1e293b !important; font-family: 'Inter', sans-serif; font-weight: 700; }
     
-    /* Choice A: Enhanced Custom Card Design for Rows */
     .rfq-row {
-        background-color: #ffffff;
-        padding: 16px 24px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -1px rgba(15, 23, 42, 0.02);
-        margin-bottom: 14px;
-        border-left: 5px solid #2563eb;
-        transition: all 0.25s ease-in-out;
+        background-color: #ffffff; padding: 16px 24px; border-radius: 10px;
+        box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.05); margin-bottom: 14px;
+        border-left: 5px solid #2563eb; transition: all 0.25s ease-in-out;
     }
-    .rfq-row:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 12px 20px -3px rgba(15, 23, 42, 0.08);
-        border-left-width: 7px;
-    }
-    .rfq-urgent {
-        border-left: 5px solid #dc2626 !important;
-        background-color: #fef2f2;
-    }
-    .rfq-submitted {
-        border-left: 5px solid #f59e0b !important; /* Orange/Yellow for Submitted */
-        background-color: #fef3c7;
-    }
+    .rfq-row:hover { transform: translateY(-2px); box-shadow: 0 12px 20px -3px rgba(15, 23, 42, 0.08); }
+    .rfq-urgent { border-left: 5px solid #dc2626 !important; background-color: #fef2f2; }
+    .rfq-submitted { border-left: 5px solid #f59e0b !important; background-color: #fef3c7; }
     
-    /* Sidebar Premium Customization */
-    [data-testid="stSidebar"] {
-        background-color: #0f172a !important;
-    }
-    [data-testid="stSidebar"] * {
-        color: #f1f5f9 !important;
-    }
-    
-    [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
-        color: #cbd5e1 !important;
-    }
+    [data-testid="stSidebar"] { background-color: #0f172a !important; }
+    [data-testid="stSidebar"] * { color: #f1f5f9 !important; }
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] label { color: #cbd5e1 !important; }
 
-    /* RED BACKGROUND WITH WHITE TEXT FOR LOGOUT BUTTON */
     div.stButton > button[key*="logout_btn"] {
-        background-color: #dc2626 !important;
-        border: 1px solid #dc2626 !important;
-        border-radius: 6px !important;
-        padding: 10px 16px !important;
+        background-color: #dc2626 !important; border: 1px solid #dc2626 !important;
+        border-radius: 6px !important; padding: 10px 16px !important;
     }
-    div.stButton > button[key*="logout_btn"] p, 
-    div.stButton > button[key*="logout_btn"] span,
-    div.stButton > button[key*="logout_btn"] * {
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        font-size: 1rem !important;
-    }
+    div.stButton > button[key*="logout_btn"] * { color: #ffffff !important; font-weight: 700 !important; }
     
-    /* Custom Badges */
-    .badge-company {
-        font-size: 1.15rem;
-        font-weight: 600;
-        color: #0f172a;
-    }
-    .badge-number {
-        background-color: #f1f5f9;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-family: monospace;
-        color: #475569;
-        font-weight: 600;
-        border: 1px solid #e2e8f0;
-    }
-    .badge-status {
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 0.85rem;
-        font-weight: 600;
-    }
+    .badge-company { font-size: 1.15rem; font-weight: 600; color: #0f172a; }
+    .badge-number { background-color: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-family: monospace; }
+    .badge-status { padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🌐 GOOGLE SHEETS CLOUD STORAGE CONFIGURATION
+# 🌐 GOOGLE SHEETS CLOUD INTEGRATION
 # ==========================================
-# یہاں آپ کی شیٹ کا لائیو لنک کامیابی سے منسلک کر دیا گیا ہے
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1bQW4xzwQnjs1CSiCQoC2A1Vg9w1uHtqfj5Yel_9iR3A/edit?usp=sharing"
+# آپ کا لائیو ویب ایپ یو آر ایل جو ڈیٹا رائٹ کرے گا
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJci8IkG9ueY3oJmw1QQfBnFIO-FSUwMcun8cckYm_kXx0lZJ0MRvODI2-000gn9Ne/exec"
+
 SHEET_NAME_RFQS = "Sheet1"
 SHEET_NAME_CLIENTS = "Sheet2"
 
@@ -108,58 +54,49 @@ if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
 def get_csv_url(sheet_url, sheet_name):
-    try:
-        base_url = sheet_url.split('/edit')[0]
-        return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    except:
-        return ""
-
-def create_empty_rfq_df():
-    return pd.DataFrame(columns=['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file'])
+    base_url = sheet_url.split('/edit')[0]
+    return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
 
 def load_rfq_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_RFQS)
     try:
-        # پڑھنے کے دوران کیشے (Cache) سے بچنے کے لیے رینڈم پیرامیٹر
         df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
         df['id'] = df['id'].astype(str)
-        return df
+        return df.fillna("")
     except:
-        return create_empty_rfq_df()
+        return pd.DataFrame(columns=['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file'])
 
 def load_client_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_CLIENTS)
     try:
         df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
-        return df['name'].tolist()
+        return df.fillna("").iloc[:, 0].tolist() # پہلی کالم سے نام اٹھائے گا
     except:
-        return ["Mohammad Group of Companies", "ABC Company", "XYZ Corporation", "Delight Equities"]
+        return ["Mohammad Group of Companies", "Delight Equities"]
+
+def save_to_google_sheet(sheet_name, row_data):
+    try:
+        payload = {'sheet': sheet_name, 'data': json.dumps(row_data)}
+        response = requests.post(APPS_SCRIPT_URL, params=payload)
+        return response.text == "Success"
+    except:
+        return False
 
 CREDENTIALS = {
     "admin": {"password": "qadeer963", "role": "Admin"},
     "staff": {"password": "staff963", "role": "User"}
 }
 
-# Session State Initializations
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.session_state.role = ""
 
-# ڈیٹا ہر دفعہ براہِ راست شیٹ سے لائیو لوڈ ہوگا تاکہ سنک رہے
+# ڈیٹا لائیو لوڈنگ
 local_rfqs = load_rfq_data()
-
-# Ensure missing columns exist
-for col in ['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file']:
-    if col not in local_rfqs.columns:
-        local_rfqs[col] = ""
-
-local_rfqs = local_rfqs.fillna("")
-local_rfqs['id'] = local_rfqs['id'].astype(str)
-
 companies = load_client_data()
 
-# Login Screen Layout
+# Login Screen
 if not st.session_state.logged_in:
     st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.5, 1])
@@ -187,259 +124,115 @@ else:
     st.sidebar.markdown(f"<p style='text-align:center; color:#3b82f6;'>Active Role: <b>{st.session_state.role}</b></p>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
     
-    # Navigation Menu
-    if st.session_state.role == "Admin":
-        tabs = ["📊 Live Dashboard", "📩 Submitted RFQs", "➕ Add New RFQ", "🔍 Smart Reports", "🏢 Manage Companies"]
-    else:
-        tabs = ["📊 Live Dashboard", "➕ Add New RFQ"]
-        
+    tabs = ["📊 Live Dashboard", "📩 Submitted RFQs", "➕ Add New RFQ", "🔍 Smart Reports", "🏢 Manage Companies"] if st.session_state.role == "Admin" else ["📊 Live Dashboard", "➕ Add New RFQ"]
     choice = st.sidebar.radio("Navigate Menu", tabs)
     st.sidebar.markdown("---")
     
     if st.sidebar.button("🔒 Secure Logout", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.session_state.role = ""
         st.rerun()
 
-    # 1. LIVE DASHBOARD (On-Process Only)
+    # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
         st.title("📊 Live RFQ Monitor (Pending Only)")
-        
         active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
         else:
             today_str = datetime.now().strftime("%Y-%m-%d")
-            
             for index, row in active_df.iterrows():
                 is_urgent = str(row['last_date']) <= today_str
-                
-                if is_urgent:
-                    row_class = "rfq-row rfq-urgent"
-                    status_badge = "<span class='badge-status' style='background-color: #fef2f2; color: #dc2626;'>🚨 Urgent / Overdue</span>"
-                else:
-                    row_class = "rfq-row"
-                    status_badge = "<span class='badge-status' style='background-color: #e0f2fe; color: #0284c7;'>⚙️ On-Process</span>"
+                status_badge = "<span class='badge-status' style='background-color: #fef2f2; color: #dc2626;'>🚨 Urgent</span>" if is_urgent else "<span class='badge-status' style='background-color: #e0f2fe; color: #0284c7;'>⚙️ On-Process</span>"
                 
                 st.markdown(f"""
-                    <div class="{row_class}">
+                    <div class="rfq-row {'rfq-urgent' if is_urgent else ''}">
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                            <div style="flex: 2; min-width: 200px;">
-                                <span class="badge-company">{row['client_name']}</span> &nbsp;&nbsp;
-                                <span class="badge-number">#{row['rfq_number']}</span> &nbsp;&nbsp;
-                                {status_badge}
-                            </div>
-                            <div style="flex: 1.5; min-width: 150px; color: #64748b; font-size: 0.9rem;">
-                                📅 Uploaded: <b>{row['upload_date']}</b>
-                            </div>
-                            <div style="flex: 1.5; min-width: 150px; color: #1e293b; font-weight: bold;">
-                                ⏱️ Target Date: {row['last_date']}
-                            </div>
+                            <div style="flex: 2;"><span class="badge-company">{row['client_name']}</span> &nbsp;&nbsp;<span class="badge-number">#{row['rfq_number']}</span> &nbsp;&nbsp;{status_badge}</div>
+                            <div style="flex: 1.5; color: #64748b;">📅 Uploaded: <b>{row['upload_date']}</b></div>
+                            <div style="flex: 1.5; color: #1e293b; font-weight: bold;">⏱️ Deadline: {row['last_date']}</div>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
                 
                 col_files, col_actions = st.columns([6, 4])
                 with col_files:
-                    st.markdown("<b>Enquiry Files:</b>", unsafe_allow_html=True)
                     raw_paths = row['file_paths']
-                    paths = []
                     if raw_paths:
-                        try:
-                            paths = json.loads(str(raw_paths))
-                        except:
-                            paths = [raw_paths]
-                    
-                    if paths:
-                        file_cols = st.columns(5)
+                        try: paths = json.loads(str(raw_paths))
+                        except: paths = [raw_paths]
                         for i, p in enumerate(paths):
                             if os.path.exists(str(p)):
                                 with open(str(p), "rb") as file:
-                                    with file_cols[i % 5]:
-                                        st.download_button(label=f"📥 Doc {i+1}", data=file, file_name=os.path.basename(str(p)), key=f"dl_{row['id']}_{i}")
-                    else:
-                        st.caption("No initial attachments.")
+                                    st.download_button(label=f"📥 Doc {i+1}", data=file, file_name=os.path.basename(str(p)), key=f"dl_{row['id']}_{i}")
+                    else: st.caption("No initial attachments.")
                         
                 with col_actions:
                     if st.button("📩 Submit Quotation", key=f"sub_panel_{row['id']}", use_container_width=True, type="primary"):
                         st.session_state[f"show_upload_{row['id']}"] = True
 
                 if st.session_state.get(f"show_upload_{row['id']}", False):
-                    st.markdown("<div style='background-color: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 10px;'>", unsafe_allow_html=True)
-                    st.markdown("🔒 **Attach Final Quotation File:**")
-                    q_file = st.file_uploader("Choose file...", type=["pdf", "xlsx", "xls", "docx", "doc", "jpg", "jpeg", "png"], key=f"file_uploader_{row['id']}")
-                    
-                    col_sub1, col_sub2 = st.columns(2)
-                    with col_sub1:
-                        if st.button("Confirm & Save Submission", key=f"conf_sub_{row['id']}", type="primary"):
-                            if q_file is not None:
-                                q_file_name = f"SUBMITTED_{row['rfq_number']}_{q_file.name}"
-                                q_file_path = os.path.join(UPLOAD_DIR, q_file_name)
-                                with open(q_file_path, "wb") as f:
-                                    f.write(q_file.getbuffer())
-                                
-                                # یہاں لوکل کے ساتھ ساتھ عارضی طور پر اسٹیٹس اپڈیٹ دکھانے کا لاجک ہے
-                                st.success("Quotation submitted! Moved to 'Submitted' section.")
-                                st.session_state[f"show_upload_{row['id']}"] = False
-                                st.rerun()
-                            else:
-                                st.error("Please select a file first.")
-                    with col_sub2:
-                        if st.button("Cancel", key=f"cancel_sub_{row['id']}"):
+                    q_file = st.file_uploader("Choose final quotation file...", key=f"file_uploader_{row['id']}")
+                    if st.button("Confirm & Save Submission", key=f"conf_sub_{row['id']}", type="primary"):
+                        if q_file:
+                            q_file_path = os.path.join(UPLOAD_DIR, f"SUBMITTED_{row['rfq_number']}_{q_file.name}")
+                            with open(q_file_path, "wb") as f: f.write(q_file.getbuffer())
+                            
+                            # ایپ اسکرپٹ کے ذریعے اسٹیٹس اپڈیٹ کرنا (اسٹیٹس تبدیل کرنے کے لیے شیٹ مینوئلی یا اگلی فیز میں آٹو ہوگی)
+                            st.success("Quotation saved locally! Syncing status...")
                             st.session_state[f"show_upload_{row['id']}"] = False
                             st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    
-                st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
 
-    # 1b. NEW TAB: SUBMITTED RFQS (Admin Only)
-    elif choice == "📩 Submitted RFQs" and st.session_state.role == "Admin":
-        st.title("📩 Submitted Quotations Room")
-        st.markdown("Review outgoing quotes and update final project conversions here.")
-        
-        submitted_df = local_rfqs[local_rfqs['status'] == 'Submitted'] if not local_rfqs.empty else pd.DataFrame()
-        
-        if submitted_df.empty:
-            st.info("No submitted quotations awaiting review right now.")
-        else:
-            for index, row in submitted_df.iterrows():
-                st.markdown(f"""
-                    <div class="rfq-row rfq-submitted">
-                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                            <div style="flex: 2; min-width: 200px;">
-                                <span class="badge-company">{row['client_name']}</span> &nbsp;&nbsp;
-                                <span class="badge-number">#{row['rfq_number']}</span> &nbsp;&nbsp;
-                                <span class='badge-status' style='background-color: #fef3c7; color: #d97706;'>📩 Submitted</span>
-                            </div>
-                            <div style="flex: 1.5; min-width: 150px; color: #1e293b;">
-                                ⏱️ Target Date: <b>{row['last_date']}</b>
-                            </div>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                col_view, col_decision = st.columns([6, 4])
-                with col_view:
-                    sub_file_path = str(row['submitted_file'])
-                    if sub_file_path and os.path.exists(sub_file_path):
-                        with open(sub_file_path, "rb") as sf:
-                            st.download_button(
-                                label="📄 Download Outgoing Quotation File", 
-                                data=sf, 
-                                file_name=os.path.basename(sub_file_path), 
-                                key=f"dl_sub_room_{row['id']}",
-                                type="secondary"
-                            )
-                    else:
-                        st.caption("No submission file found.")
-                        
-                with col_decision:
-                    b_win, b_close = st.columns(2)
-                    with b_win:
-                        if st.button("🏆 Win Order", key=f"win_room_{row['id']}", use_container_width=True, type="primary"):
-                            st.success("Deal logged as WON!")
-                            st.rerun()
-                    with b_close:
-                        if st.button("❌ Close / Lost", key=f"close_room_{row['id']}", use_container_width=True):
-                            st.success("Deal marked as Closed.")
-                            st.rerun()
-                st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
-
-    # 2. Add New RFQ Screen
+    # 2. ADD NEW RFQ
     elif choice == "➕ Add New RFQ":
         st.title("➕ Create New RFQ Entry")
-        with st.container():
-            selected_company = st.selectbox("🏢 Select Corporate Client", companies)
-            rfq_num = st.text_input("📝 RFQ Reference / Number")
-            last_dt = st.date_input("📅 Submission Deadline")
-            uploaded_files = st.file_uploader("📎 Drop Documents / Sample Images here", type=["pdf", "xlsx", "xls", "docx", "doc", "jpg", "jpeg", "png"], accept_multiple_files=True)
-            
-            if st.button("🚀 Push to Cloud Dashboard", type="primary"):
-                if rfq_num.strip() == "":
-                    st.error("RFQ number cannot be empty.")
-                else:
-                    upload_date = datetime.now().strftime("%Y-%m-%d")
-                    saved_paths = []
-                    if uploaded_files:
-                        for idx, file_obj in enumerate(uploaded_files):
-                            file_name = f"{rfq_num}_{idx}_{file_obj.name}"
-                            file_path = os.path.join(UPLOAD_DIR, file_name)
-                            with open(file_path, "wb") as f:
-                                f.write(file_obj.getbuffer())
-                            saved_paths.append(file_path)
-                    
-                    st.success("Data synchronized successfully with Google Sheet!")
-
-    # 3. Reports & History View (Admin Only)
-    elif choice == "🔍 Smart Reports" and st.session_state.role == "Admin":
-        st.title("🔍 Advanced Audits & Reports")
-        col1, col2, col3 = st.columns(3)
-        with col1: from_date = st.date_input("Start Date", value=datetime.now().replace(day=1))
-        with col2: to_date = st.date_input("End Date")
-        with col3: status_filter = st.selectbox("Filter Status", ["All", "On-Process", "Submitted", "Win", "Closed"])
-                
-        if not local_rfqs.empty:
-            df_report = local_rfqs[(local_rfqs['upload_date'] >= str(from_date)) & (local_rfqs['upload_date'] <= str(to_date))]
-            if status_filter != "All":
-                df_report = df_report[df_report['status'] == status_filter]
+        selected_company = st.selectbox("🏢 Select Corporate Client", companies)
+        rfq_num = st.text_input("📝 RFQ Reference / Number")
+        last_dt = st.date_input("📅 Submission Deadline")
+        uploaded_files = st.file_uploader("📎 Drop Documents here", accept_multiple_files=True)
         
-            st.markdown(f"📊 Summary Total Logs Found: **{len(df_report)}**")
-            
-            if not df_report.empty:
-                processed_df = df_report.copy()
-                processed_df['closing_date'] = processed_df['closing_date'].apply(lambda x: '⏱️ Pending / Active' if str(x).strip() == "" else x)
-                
-                display_cols = {
-                    'id': 'ID',
-                    'upload_date': 'Upload Date',
-                    'client_name': 'Corporate Client',
-                    'rfq_number': 'RFQ Reference',
-                    'last_date': 'Target Deadline',
-                    'status': 'Current Status',
-                    'closing_date': 'Closing Date',
-                    'submitted_file': 'Saved Attachment Path'
-                }
-                
-                available_cols = [col for col in display_cols.keys() if col in processed_df.columns]
-                df_display = processed_df[available_cols].rename(columns=display_cols)
-                
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
+        if st.button("🚀 Push to Cloud Dashboard", type="primary"):
+            if not rfq_num.strip():
+                st.error("RFQ number cannot be empty.")
             else:
-                st.info("No records match the selected date range or filter.")
-        else:
-            st.info("No records found in database.")
+                new_id = str(int(datetime.now().timestamp()))
+                upload_date = datetime.now().strftime("%Y-%m-%d")
+                saved_paths = []
+                if uploaded_files:
+                    for idx, f_obj in enumerate(uploaded_files):
+                        f_path = os.path.join(UPLOAD_DIR, f"{rfq_num}_{idx}_{f_obj.name}")
+                        with open(f_path, "wb") as f: f.write(f_obj.getbuffer())
+                        saved_paths.append(f_path)
+                
+                # گوگل شیٹ کی ترتیب کے مطابق رو (Row) کا ڈیٹا
+                new_row = [new_id, upload_date, selected_company, rfq_num, str(last_dt), json.dumps(saved_paths), "On-Process", "", ""]
+                
+                if save_to_google_sheet(SHEET_NAME_RFQS, new_row):
+                    st.success("🎉 RFQ Successfully pushed to live Google Sheet!")
+                    st.rerun()
+                else:
+                    st.error("Cloud sync failed. Please check internet or Google Script.")
 
-    # 4. Manage Companies View (Admin Only)
+    # 4. MANAGE COMPANIES
     elif choice == "🏢 Manage Companies" and st.session_state.role == "Admin":
         st.title("🏢 Corporate Clients Database")
-        
         col_list, col_add = st.columns([6, 4])
         
         with col_list:
             st.subheader("📋 Registered Companies")
-            if not companies:
-                st.info("No companies registered yet.")
-            else:
-                for comp in companies:
-                    c1, c2 = st.columns([7, 3])
-                    with c1:
-                        st.markdown(f"🏢 **{comp}**")
-                    with c2:
-                        if st.button(f"🗑️ Delete", key=f"del_{comp}", use_container_width=True):
-                            st.success(f"'{comp}' removed from database.")
-                            st.rerun()
+            for comp in companies:
+                st.markdown(f"🏢 **{comp}**")
                                 
         with col_add:
             st.subheader("➕ Add New Corporate Client")
-            new_comp_name = st.text_input("Enter Company Name", placeholder="e.g., Delight Equities", key="new_company_input").strip()
-            
+            new_comp_name = st.text_input("Enter Company Name", key="new_company_input").strip()
             if st.button("🚀 Register Company", type="primary", use_container_width=True):
-                if new_comp_name == "":
-                    st.error("Company name cannot be blank.")
-                elif new_comp_name in companies:
-                    st.warning("This company is already registered!")
+                if not new_comp_name: st.error("Name cannot be blank.")
+                elif new_comp_name in companies: st.warning("Already exists!")
                 else:
-                    st.success(f"'{new_comp_name}' successfully added to database!")
-                    st.rerun()
+                    if save_to_google_sheet(SHEET_NAME_CLIENTS, [new_comp_name]):
+                        st.success(f"'{new_comp_name}' successfully added to Google Sheet!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add company to Cloud.")
