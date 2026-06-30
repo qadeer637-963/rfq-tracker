@@ -43,7 +43,6 @@ st.markdown("""
 # 🌐 GOOGLE SHEETS CLOUD INTEGRATION
 # ==========================================
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1bQW4xzwQnjs1CSiCQoC2A1Vg9w1uHtqfj5Yel_9iR3A/edit?usp=sharing"
-# آپ کا لائیو ویب ایپ یو آر ایل جو ڈیٹا رائٹ کرے گا
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJci8IkG9ueY3oJmw1QQfBnFIO-FSUwMcun8cckYm_kXx0lZJ0MRvODI2-000gn9Ne/exec"
 
 SHEET_NAME_RFQS = "Sheet1"
@@ -70,7 +69,7 @@ def load_client_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_CLIENTS)
     try:
         df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
-        return df.fillna("").iloc[:, 0].tolist() # پہلی کالم سے نام اٹھائے گا
+        return df.fillna("").iloc[:, 0].tolist()
     except:
         return ["Mohammad Group of Companies", "Delight Equities"]
 
@@ -172,16 +171,23 @@ else:
                         st.session_state[f"show_upload_{row['id']}"] = True
 
                 if st.session_state.get(f"show_upload_{row['id']}", False):
-                    q_file = st.file_uploader("Choose final quotation file...", key=f"file_uploader_{row['id']}")
+                    # ریسیٹ کرنے کے لیے ڈائنامک کی (Key) کا استعمال
+                    uploader_key = f"file_uploader_{row['id']}_{st.session_state.get(f'uploader_version_{row[\"id\"]}', 0)}"
+                    q_file = st.file_uploader("Choose final quotation file...", key=uploader_key)
+                    
                     if st.button("Confirm & Save Submission", key=f"conf_sub_{row['id']}", type="primary"):
                         if q_file:
                             q_file_path = os.path.join(UPLOAD_DIR, f"SUBMITTED_{row['rfq_number']}_{q_file.name}")
                             with open(q_file_path, "wb") as f: f.write(q_file.getbuffer())
                             
-                            # ایپ اسکرپٹ کے ذریعے اسٹیٹس اپڈیٹ کرنا (اسٹیٹس تبدیل کرنے کے لیے شیٹ مینوئلی یا اگلی فیز میں آٹو ہوگی)
-                            st.success("Quotation saved locally! Syncing status...")
+                            st.success("🎉 Quotation file saved successfully!")
+                            
+                            # فائل اپلوڈر کو فوراً صاف کرنے کے لیے ورژن بڑھا دیں
+                            st.session_state[f"uploader_version_{row['id']}"] = st.session_state.get(f"uploader_version_{row['id']}", 0) + 1
                             st.session_state[f"show_upload_{row['id']}"] = False
                             st.rerun()
+                        else:
+                            st.error("Please attach a file first before confirming.")
                 st.markdown("<br>", unsafe_allow_html=True)
 
     # 2. ADD NEW RFQ
@@ -205,14 +211,13 @@ else:
                         with open(f_path, "wb") as f: f.write(f_obj.getbuffer())
                         saved_paths.append(f_path)
                 
-                # گوگل شیٹ کی ترتیب کے مطابق رو (Row) کا ڈیٹا
                 new_row = [new_id, upload_date, selected_company, rfq_num, str(last_dt), json.dumps(saved_paths), "On-Process", "", ""]
                 
                 if save_to_google_sheet(SHEET_NAME_RFQS, new_row):
                     st.success("🎉 RFQ Successfully pushed to live Google Sheet!")
                     st.rerun()
                 else:
-                    st.error("Cloud sync failed. Please check internet or Google Script.")
+                    st.error("Cloud sync failed. Please check your Google Sheet column headers or Apps Script Deployments.")
 
     # 4. MANAGE COMPANIES
     elif choice == "🏢 Manage Companies" and st.session_state.role == "Admin":
@@ -235,4 +240,4 @@ else:
                         st.success(f"'{new_comp_name}' successfully added to Google Sheet!")
                         st.rerun()
                     else:
-                        st.error("Failed to add company to Cloud.")
+                        st.error("Failed to add company to Cloud. Please make sure Row 1 of Sheet2 has a column header (e.g., 'name').")
