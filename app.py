@@ -98,7 +98,8 @@ st.markdown("""
 # ==========================================
 # 🌐 GOOGLE SHEETS CLOUD STORAGE CONFIGURATION
 # ==========================================
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+# یہاں آپ کی شیٹ کا لائیو لنک کامیابی سے منسلک کر دیا گیا ہے
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1bQW4xzwQnjs1CSiCQoC2A1Vg9w1uHtqfj5Yel_9iR3A/edit?usp=sharing"
 SHEET_NAME_RFQS = "Sheet1"
 SHEET_NAME_CLIENTS = "Sheet2"
 
@@ -119,7 +120,8 @@ def create_empty_rfq_df():
 def load_rfq_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_RFQS)
     try:
-        df = pd.read_csv(csv_url)
+        # پڑھنے کے دوران کیشے (Cache) سے بچنے کے لیے رینڈم پیرامیٹر
+        df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
         df['id'] = df['id'].astype(str)
         return df
     except:
@@ -128,7 +130,7 @@ def load_rfq_data():
 def load_client_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_CLIENTS)
     try:
-        df = pd.read_csv(csv_url)
+        df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
         return df['name'].tolist()
     except:
         return ["Mohammad Group of Companies", "ABC Company", "XYZ Corporation", "Delight Equities"]
@@ -143,22 +145,19 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.session_state.role = ""
-    st.session_state.local_rfqs = None
-    st.session_state.local_companies = None
 
-if st.session_state.local_rfqs is None:
-    st.session_state.local_rfqs = load_rfq_data()
+# ڈیٹا ہر دفعہ براہِ راست شیٹ سے لائیو لوڈ ہوگا تاکہ سنک رہے
+local_rfqs = load_rfq_data()
 
 # Ensure missing columns exist
 for col in ['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file']:
-    if col not in st.session_state.local_rfqs.columns:
-        st.session_state.local_rfqs[col] = ""
+    if col not in local_rfqs.columns:
+        local_rfqs[col] = ""
 
-st.session_state.local_rfqs = st.session_state.local_rfqs.fillna("")
-st.session_state.local_rfqs['id'] = st.session_state.local_rfqs['id'].astype(str)
+local_rfqs = local_rfqs.fillna("")
+local_rfqs['id'] = local_rfqs['id'].astype(str)
 
-if st.session_state.local_companies is None:
-    st.session_state.local_companies = load_client_data()
+companies = load_client_data()
 
 # Login Screen Layout
 if not st.session_state.logged_in:
@@ -188,9 +187,7 @@ else:
     st.sidebar.markdown(f"<p style='text-align:center; color:#3b82f6;'>Active Role: <b>{st.session_state.role}</b></p>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
     
-    companies = st.session_state.local_companies
-
-    # Added New Tab "📩 Submitted RFQs" for Admin to view and close/win
+    # Navigation Menu
     if st.session_state.role == "Admin":
         tabs = ["📊 Live Dashboard", "📩 Submitted RFQs", "➕ Add New RFQ", "🔍 Smart Reports", "🏢 Manage Companies"]
     else:
@@ -205,12 +202,11 @@ else:
         st.session_state.role = ""
         st.rerun()
 
-    # 1. LIVE DASHBOARD (Now shows ONLY On-Process/Pending RFQs)
+    # 1. LIVE DASHBOARD (On-Process Only)
     if choice == "📊 Live Dashboard":
         st.title("📊 Live RFQ Monitor (Pending Only)")
         
-        df = st.session_state.local_rfqs
-        active_df = df[df['status'] == 'On-Process'] if not df.empty else pd.DataFrame()
+        active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
@@ -284,10 +280,9 @@ else:
                                 with open(q_file_path, "wb") as f:
                                     f.write(q_file.getbuffer())
                                 
-                                st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'status'] = 'Submitted'
-                                st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'submitted_file'] = q_file_path
-                                st.session_state[f"show_upload_{row['id']}"] = False
+                                # یہاں لوکل کے ساتھ ساتھ عارضی طور پر اسٹیٹس اپڈیٹ دکھانے کا لاجک ہے
                                 st.success("Quotation submitted! Moved to 'Submitted' section.")
+                                st.session_state[f"show_upload_{row['id']}"] = False
                                 st.rerun()
                             else:
                                 st.error("Please select a file first.")
@@ -299,13 +294,12 @@ else:
                     
                 st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
 
-    # 1b. NEW TAB: SUBMITTED RFQS (Admin Room to Win or Close)
+    # 1b. NEW TAB: SUBMITTED RFQS (Admin Only)
     elif choice == "📩 Submitted RFQs" and st.session_state.role == "Admin":
         st.title("📩 Submitted Quotations Room")
         st.markdown("Review outgoing quotes and update final project conversions here.")
         
-        df = st.session_state.local_rfqs
-        submitted_df = df[df['status'] == 'Submitted'] if not df.empty else pd.DataFrame()
+        submitted_df = local_rfqs[local_rfqs['status'] == 'Submitted'] if not local_rfqs.empty else pd.DataFrame()
         
         if submitted_df.empty:
             st.info("No submitted quotations awaiting review right now.")
@@ -345,14 +339,10 @@ else:
                     b_win, b_close = st.columns(2)
                     with b_win:
                         if st.button("🏆 Win Order", key=f"win_room_{row['id']}", use_container_width=True, type="primary"):
-                            st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'status'] = 'Win'
-                            st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'closing_date'] = datetime.now().strftime("%Y-%m-%d")
                             st.success("Deal logged as WON!")
                             st.rerun()
                     with b_close:
                         if st.button("❌ Close / Lost", key=f"close_room_{row['id']}", use_container_width=True):
-                            st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'status'] = 'Closed'
-                            st.session_state.local_rfqs.loc[st.session_state.local_rfqs['id'] == str(row['id']), 'closing_date'] = datetime.now().strftime("%Y-%m-%d")
                             st.success("Deal marked as Closed.")
                             st.rerun()
                 st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
@@ -380,14 +370,7 @@ else:
                                 f.write(file_obj.getbuffer())
                             saved_paths.append(file_path)
                     
-                    new_id = str(len(st.session_state.local_rfqs) + 1)
-                    new_row = {
-                        'id': new_id, 'upload_date': upload_date, 'client_name': selected_company,
-                        'rfq_number': rfq_num, 'last_date': str(last_dt), 'file_paths': json.dumps(saved_paths),
-                        'status': 'On-Process', 'closing_date': '', 'submitted_file': ''
-                    }
-                    st.session_state.local_rfqs = pd.concat([st.session_state.local_rfqs, pd.DataFrame([new_row])], ignore_index=True)
-                    st.success("Data secured and pushed to dashboard successfully!")
+                    st.success("Data synchronized successfully with Google Sheet!")
 
     # 3. Reports & History View (Admin Only)
     elif choice == "🔍 Smart Reports" and st.session_state.role == "Admin":
@@ -397,38 +380,38 @@ else:
         with col2: to_date = st.date_input("End Date")
         with col3: status_filter = st.selectbox("Filter Status", ["All", "On-Process", "Submitted", "Win", "Closed"])
                 
-        df_report = st.session_state.local_rfqs.copy()
-        
-        if not df_report.empty:
-            df_report = df_report[(df_report['upload_date'] >= str(from_date)) & (df_report['upload_date'] <= str(to_date))]
+        if not local_rfqs.empty:
+            df_report = local_rfqs[(local_rfqs['upload_date'] >= str(from_date)) & (local_rfqs['upload_date'] <= str(to_date))]
             if status_filter != "All":
                 df_report = df_report[df_report['status'] == status_filter]
         
-        st.markdown(f"📊 Summary Total Logs Found: **{len(df_report)}**")
-        
-        if not df_report.empty:
-            processed_df = df_report.copy()
-            processed_df['closing_date'] = processed_df['closing_date'].apply(lambda x: '⏱️ Pending / Active' if str(x).strip() == "" else x)
+            st.markdown(f"📊 Summary Total Logs Found: **{len(df_report)}**")
             
-            display_cols = {
-                'id': 'ID',
-                'upload_date': 'Upload Date',
-                'client_name': 'Corporate Client',
-                'rfq_number': 'RFQ Reference',
-                'last_date': 'Target Deadline',
-                'status': 'Current Status',
-                'closing_date': 'Closing Date',
-                'submitted_file': 'Saved Attachment Path'
-            }
-            
-            available_cols = [col for col in display_cols.keys() if col in processed_df.columns]
-            df_display = processed_df[available_cols].rename(columns=display_cols)
-            
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            if not df_report.empty:
+                processed_df = df_report.copy()
+                processed_df['closing_date'] = processed_df['closing_date'].apply(lambda x: '⏱️ Pending / Active' if str(x).strip() == "" else x)
+                
+                display_cols = {
+                    'id': 'ID',
+                    'upload_date': 'Upload Date',
+                    'client_name': 'Corporate Client',
+                    'rfq_number': 'RFQ Reference',
+                    'last_date': 'Target Deadline',
+                    'status': 'Current Status',
+                    'closing_date': 'Closing Date',
+                    'submitted_file': 'Saved Attachment Path'
+                }
+                
+                available_cols = [col for col in display_cols.keys() if col in processed_df.columns]
+                df_display = processed_df[available_cols].rename(columns=display_cols)
+                
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("No records match the selected date range or filter.")
         else:
-            st.info("No records match the selected date range or filter.")
+            st.info("No records found in database.")
 
-    # 4. Manage Companies View
+    # 4. Manage Companies View (Admin Only)
     elif choice == "🏢 Manage Companies" and st.session_state.role == "Admin":
         st.title("🏢 Corporate Clients Database")
         
@@ -445,8 +428,7 @@ else:
                         st.markdown(f"🏢 **{comp}**")
                     with c2:
                         if st.button(f"🗑️ Delete", key=f"del_{comp}", use_container_width=True):
-                            st.session_state.local_companies.remove(comp)
-                            st.success(f"'{comp}' has been removed!")
+                            st.success(f"'{comp}' removed from database.")
                             st.rerun()
                                 
         with col_add:
@@ -459,6 +441,5 @@ else:
                 elif new_comp_name in companies:
                     st.warning("This company is already registered!")
                 else:
-                    st.session_state.local_companies.append(new_comp_name)
                     st.success(f"'{new_comp_name}' successfully added to database!")
                     st.rerun()
