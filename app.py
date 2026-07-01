@@ -54,14 +54,17 @@ if not os.path.exists(UPLOAD_DIR):
 
 def get_csv_url(sheet_url, sheet_name):
     base_url = sheet_url.split('/edit')[0]
-    return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+    # سخت کیشے بائی پاس کے لیے رینڈم ٹائم پیرامیٹر شامل کیا گیا ہے
+    return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}&t={int(datetime.now().timestamp())}"
 
 def load_rfq_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_RFQS)
     try:
-        # فوراً نیا ڈیٹا لانے کے لیے ٹائم اسٹیمپ کا استعمال
-        df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
+        df = pd.read_csv(csv_url)
         df['id'] = df['id'].astype(str)
+        # سٹیٹس کے ٹیکسٹ کو کلین کریں تاکہ میچنگ میں غلطی نہ ہو
+        if 'status' in df.columns:
+            df['status'] = df['status'].astype(str).str.strip()
         return df.fillna("")
     except:
         return pd.DataFrame(columns=['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file'])
@@ -69,7 +72,7 @@ def load_rfq_data():
 def load_client_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_CLIENTS)
     try:
-        df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
+        df = pd.read_csv(csv_url)
         return df.fillna("").iloc[:, 0].tolist()
     except:
         return ["Mohammad Group of Companies", "Delight Equities"]
@@ -108,11 +111,10 @@ if "logged_in" not in st.session_state:
     st.session_state.username = ""
     st.session_state.role = ""
 
-# لائیو بورڈ فلٹر کیشے
+# گلوبل سبمٹڈ کیشے جو دونوں اکاؤنٹس کے لائیو رن پر اثر کرے گی
 if "submitted_cache" not in st.session_state:
     st.session_state.submitted_cache = {}
 
-# 🔥 ڈیٹا لوڈنگ اب لائیو فنکشن کے ذریعے نیچے ہوگی تاکہ ایڈمن ایکشن کے بعد پرانا ڈیٹا نہ دیکھے
 companies = load_client_data()
 
 # Login Screen
@@ -152,7 +154,7 @@ else:
         st.session_state.submitted_cache = {}
         st.rerun()
 
-    # ہر ٹیب کے رن ہونے پر کلاؤڈ سے تازہ ڈیٹا اٹھائیں تاکہ ایڈمن کی تبدیلیاں فوراً لاگو ہوں
+    # 🔄 ہر کلک اور ایکشن پر کلاؤڈ کا تازہ ترین لائیو ڈیٹا کیشے کے بغیر لوڈ کریں
     local_rfqs = load_rfq_data()
 
     # 1. LIVE DASHBOARD
@@ -160,11 +162,14 @@ else:
         st.title("📊 Live RFQ Monitor (Pending Only)")
         
         # صرف On-Process والی کوٹیشنز فلٹر کریں
-        active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
+        if not local_rfqs.empty and 'status' in local_rfqs.columns:
+            active_df = local_rfqs[local_rfqs['status'] == 'On-Process']
+        else:
+            active_df = pd.DataFrame()
         
-        # سیشن کیشے کی بنیاد پر بھی سختی سے فلٹر کریں
+        # کیشے کی بنیاد پر بھی سختی سے لائیو مانیٹر سے فلٹر آؤٹ کریں
         if not active_df.empty:
-            active_df = active_df[~active_df['id'].isin(st.session_state.submitted_cache.keys())]
+            active_df = active_df[~active_df['id'].astype(str).isin([str(k) for k in st.session_state.submitted_cache.keys()])]
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
@@ -215,12 +220,12 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ اپڈیٹ
+                            # کلاؤڈ شیٹ اپڈیٹ کریں
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # کیشے میں سیو کریں فوراً ریموو کرنے کے لیے
-                            st.session_state.submitted_cache[row_id] = {
-                                "id": row_id,
+                            # لوکل سیشن کو اپڈیٹ کریں تاکہ فوراً ریموو ہو جائے
+                            st.session_state.submitted_cache[str(row_id)] = {
+                                "id": str(row_id),
                                 "client_name": row['client_name'],
                                 "rfq_number": row['rfq_number'],
                                 "upload_date": row['upload_date'],
@@ -240,14 +245,21 @@ else:
     elif choice == "📩 Submitted RFQs":
         st.title("📩 Archive of Submitted Quotations")
         
-        cloud_submitted = local_rfqs[local_rfqs['status'] == 'Submitted'] if not local_rfqs.empty else pd.DataFrame()
+        # کلاؤڈ شیٹ سے ڈیٹا لائیں جن کا اسٹیٹس 'Submitted' ہو چکا ہو
+        if not local_rfqs.empty and 'status' in local_rfqs.columns:
+            cloud_submitted = local_rfqs[local_rfqs['status'] == 'Submitted']
+        else:
+            cloud_submitted = pd.DataFrame()
+            
         display_list = []
         seen_ids = set()
         
+        # پہلے لوکل سیشن کا تازہ ڈیٹا ڈالیں
         for r_id, r_data in st.session_state.submitted_cache.items():
             display_list.append(r_data)
-            seen_ids.add(r_id)
+            seen_ids.add(str(r_id))
             
+        # پھر کلاؤڈ والا لائیو ڈیٹا مرج کریں
         if not cloud_submitted.empty:
             for index, row in cloud_submitted.iterrows():
                 c_id = str(row['id'])
