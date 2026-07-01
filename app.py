@@ -56,6 +56,15 @@ SYNC_FILE = "server_sync.json"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
+def clean_rfq_string(val):
+    """RFQ نمبرز کو فلوٹ (1122.0) سے صاف ستھرا اسٹرنگ (1122) بنانے کا فنکشن"""
+    if pd.isna(val) or val == "":
+        return ""
+    val_str = str(val).strip()
+    if val_str.endswith('.0'):
+        return val_str[:-2]
+    return val_str
+
 def get_global_submitted_rfqs():
     if not os.path.exists(SYNC_FILE):
         return {}
@@ -93,9 +102,9 @@ def load_rfq_data():
     try:
         df = pd.read_csv(csv_url)
         df['id'] = df['id'].astype(str)
-        # RFQ نمبر کو سٹرنگ بنا کر کلین کرنا تاکہ میچنگ میں مسئلہ نہ ہو
+        # 🛠️ یہاں ہم ڈاٹ زیرو (.0) کو ختم کر کے ڈیٹا کلین کر رہے ہیں
         if 'rfq_number' in df.columns:
-            df['rfq_number'] = df['rfq_number'].astype(str).str.strip()
+            df['rfq_number'] = df['rfq_number'].apply(clean_rfq_string)
         if 'status' in df.columns:
             df['status'] = df['status'].astype(str).str.strip().str.lower()
         return df.fillna("")
@@ -377,7 +386,7 @@ else:
                                 st.rerun()
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 3. ADD NEW RFQ (⚡ مکمل فکسڈ ڈپلیکیٹ چیکر)
+    # 3. ADD NEW RFQ (🛠️ فلوٹ ایشو فکسڈ)
     elif choice == "➕ Add New RFQ":
         st.title("➕ Create New RFQ Entry")
         selected_company = st.selectbox("🏢 Select Corporate Client", companies)
@@ -389,18 +398,17 @@ else:
             if not rfq_num:
                 st.error("RFQ number cannot be empty.")
             else:
-                # 🛠️ سپر کلین چیک: کلاؤڈ اور لوکل لسٹ دونوں میں موجود تمام RFQ نمبرز کو سٹرنگ لسٹ میں لانا
+                # کلاؤڈ اور لوکل ڈیٹا بیس دونوں کی ویلیوز کو کلین اور ڈاٹ زیرو سے پاک کرنا
                 cloud_rfq_numbers = []
                 if not local_rfqs.empty and 'rfq_number' in local_rfqs.columns:
-                    cloud_rfq_numbers = [str(x).strip() for x in local_rfqs['rfq_number'].tolist()]
+                    cloud_rfq_numbers = [clean_rfq_string(x) for x in local_rfqs['rfq_number'].tolist()]
                 
-                global_rfq_numbers = [str(data['rfq_number']).strip() for data in global_submitted.values()]
+                global_rfq_numbers = [clean_rfq_string(data['rfq_number']) for data in global_submitted.values()]
                 
-                # دونوں لسٹوں کو آپس میں ملا کر ایک کر دیا
                 all_existing_rfqs = set(cloud_rfq_numbers + global_rfq_numbers)
                 
-                # حتمی چیکنگ
-                if rfq_num in all_existing_rfqs:
+                # اب اگر یوزر 1122 لکھے گا، وہ شیٹ کے 1122.0 کے کلین ورژن '1122' سے پرفیکٹ میچ ہو جائے گا!
+                if clean_rfq_string(rfq_num) in all_existing_rfqs:
                     st.error(f"⚠️ RFQ Number '#{rfq_num}' پہلے سے سسٹم میں موجود ہے! براہ کرم نیا یا یونیک نمبر درج کریں۔")
                 else:
                     new_id = str(int(datetime.now().timestamp()))
