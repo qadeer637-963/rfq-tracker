@@ -54,17 +54,17 @@ if not os.path.exists(UPLOAD_DIR):
 
 def get_csv_url(sheet_url, sheet_name):
     base_url = sheet_url.split('/edit')[0]
-    # سخت کیشے بائی پاس کے لیے رینڈم ٹائم پیرامیٹر شامل کیا گیا ہے
-    return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}&t={int(datetime.now().timestamp())}"
+    # گوگل کیشے بائی پاس کرنے کے لیے لائیو سیکنڈز کا رینڈم نمبر لگانا لازمی ہے
+    return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(datetime.now().timestamp())}"
 
 def load_rfq_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_RFQS)
     try:
         df = pd.read_csv(csv_url)
         df['id'] = df['id'].astype(str)
-        # سٹیٹس کے ٹیکسٹ کو کلین کریں تاکہ میچنگ میں غلطی نہ ہو
+        # سٹیٹس کالم کو صاف ستھرا کریں تاکہ میچنگ لائیو اور پکی ہو
         if 'status' in df.columns:
-            df['status'] = df['status'].astype(str).str.strip()
+            df['status'] = df['status'].astype(str).str.strip().str.lower()
         return df.fillna("")
     except:
         return pd.DataFrame(columns=['id', 'upload_date', 'client_name', 'rfq_number', 'last_date', 'file_paths', 'status', 'closing_date', 'submitted_file'])
@@ -105,13 +105,11 @@ CREDENTIALS = {
     "staff": {"password": "staff963", "role": "User"}
 }
 
-# سیشن اسٹیٹس ہینڈلنگ
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.session_state.role = ""
 
-# گلوبل سبمٹڈ کیشے جو دونوں اکاؤنٹس کے لائیو رن پر اثر کرے گی
 if "submitted_cache" not in st.session_state:
     st.session_state.submitted_cache = {}
 
@@ -154,20 +152,26 @@ else:
         st.session_state.submitted_cache = {}
         st.rerun()
 
-    # 🔄 ہر کلک اور ایکشن پر کلاؤڈ کا تازہ ترین لائیو ڈیٹا کیشے کے بغیر لوڈ کریں
+    # کلاؤڈ ڈیٹا لوڈنگ
     local_rfqs = load_rfq_data()
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
-        st.title("📊 Live RFQ Monitor (Pending Only)")
-        
-        # صرف On-Process والی کوٹیشنز فلٹر کریں
+        col_title, col_ref = st.columns([8, 2])
+        with col_title:
+            st.title("📊 Live RFQ Monitor (Pending Only)")
+        with col_ref:
+            # 🔄 دوسرے سیشن کی لائیو تبدیلی دیکھنے کے لیے مینیو ریفریش بٹن
+            if st.button("🔄 Sync Cloud", use_container_width=True):
+                st.rerun()
+
+        # صرف 'on-process' اسٹیٹس والی کوٹیشنز فلٹر کریں
         if not local_rfqs.empty and 'status' in local_rfqs.columns:
-            active_df = local_rfqs[local_rfqs['status'] == 'On-Process']
+            active_df = local_rfqs[local_rfqs['status'] == 'on-process']
         else:
             active_df = pd.DataFrame()
         
-        # کیشے کی بنیاد پر بھی سختی سے لائیو مانیٹر سے فلٹر آؤٹ کریں
+        # لوکل سیشن فلٹر (جس اکاؤنٹ سے سبمٹ ہو رہی ہے وہاں سے فوراً غائب کرنے کے لیے)
         if not active_df.empty:
             active_df = active_df[~active_df['id'].astype(str).isin([str(k) for k in st.session_state.submitted_cache.keys()])]
         
@@ -220,10 +224,10 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ شیٹ اپڈیٹ کریں
+                            # کلاؤڈ شیٹ اپڈیٹ (یہاں سٹیٹس کو بالکل صاف 'Submitted' بھیج رہے ہیں)
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # لوکل سیشن کو اپڈیٹ کریں تاکہ فوراً ریموو ہو جائے
+                            # کرنٹ سیشن کیشے ہینڈلنگ
                             st.session_state.submitted_cache[str(row_id)] = {
                                 "id": str(row_id),
                                 "client_name": row['client_name'],
@@ -245,21 +249,20 @@ else:
     elif choice == "📩 Submitted RFQs":
         st.title("📩 Archive of Submitted Quotations")
         
-        # کلاؤڈ شیٹ سے ڈیٹا لائیں جن کا اسٹیٹس 'Submitted' ہو چکا ہو
         if not local_rfqs.empty and 'status' in local_rfqs.columns:
-            cloud_submitted = local_rfqs[local_rfqs['status'] == 'Submitted']
+            cloud_submitted = local_rfqs[local_rfqs['status'] == 'submitted']
         else:
             cloud_submitted = pd.DataFrame()
             
         display_list = []
         seen_ids = set()
         
-        # پہلے لوکل سیشن کا تازہ ڈیٹا ڈالیں
+        # کرنٹ سیشن ڈیٹا مرجنگ
         for r_id, r_data in st.session_state.submitted_cache.items():
             display_list.append(r_data)
             seen_ids.add(str(r_id))
             
-        # پھر کلاؤڈ والا لائیو ڈیٹا مرج کریں
+        # کلاؤڈ لائیو ڈیٹا مرجنگ
         if not cloud_submitted.empty:
             for index, row in cloud_submitted.iterrows():
                 c_id = str(row['id'])
