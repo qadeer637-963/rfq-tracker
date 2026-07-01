@@ -21,7 +21,7 @@ st.markdown("""
     }
     .rfq-row:hover { transform: translateY(-2px); box-shadow: 0 12px 20px -3px rgba(15, 23, 42, 0.08); }
     .rfq-urgent { border-left: 5px solid #dc2626 !important; background-color: #fef2f2; }
-    .rfq-submitted { border-left: 5px solid #f59e0b !important; background-color: #fef3c7; }
+    .rfq-submitted { border-left: 5px solid #10b981 !important; background-color: #f0fdf4; }
     
     [data-testid="stSidebar"] { background-color: #0f172a !important; }
     [data-testid="stSidebar"] * { color: #f1f5f9 !important; }
@@ -107,9 +107,9 @@ if "logged_in" not in st.session_state:
     st.session_state.username = ""
     st.session_state.role = ""
 
-# 🛠️ سبمٹڈ آئیڈیز کو لوکل چھپانے کے لیے لسٹ
-if "hidden_rfqs" not in st.session_state:
-    st.session_state.hidden_rfqs = []
+# 🛠️ لائیو بورڈ سے ہٹائے گئے اور سبمٹ کیے گئے آئٹمز کو لوکل سیشن میں رکھنے کے لیے ڈکشنری
+if "submitted_cache" not in st.session_state:
+    st.session_state.submitted_cache = {}
 
 # ڈیٹا لائیو لوڈنگ
 local_rfqs = load_rfq_data()
@@ -143,25 +143,25 @@ else:
     st.sidebar.markdown(f"<p style='text-align:center; color:#3b82f6;'>Active Role: <b>{st.session_state.role}</b></p>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
     
-    tabs = ["📊 Live Dashboard", "📩 Submitted RFQs", "➕ Add New RFQ", "🔍 Smart Reports", "🏢 Manage Companies"] if st.session_state.role == "Admin" else ["📊 Live Dashboard", "➕ Add New RFQ"]
+    tabs = ["📊 Live Dashboard", "📩 Submitted RFQs", "➕ Add New RFQ", "🏢 Manage Companies"] if st.session_state.role == "Admin" else ["📊 Live Dashboard", "➕ Add New RFQ", "📩 Submitted RFQs"]
     choice = st.sidebar.radio("Navigate Menu", tabs)
     st.sidebar.markdown("---")
     
     if st.sidebar.button("🔒 Secure Logout", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.hidden_rfqs = []  # لاگ آؤٹ پر ہسٹری صاف کریں
+        st.session_state.submitted_cache = {}  # لاگ آؤٹ پر ہسٹری صاف کریں
         st.rerun()
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
         st.title("📊 Live RFQ Monitor (Pending Only)")
         
-        # فلٹر ۱: صرف On-Process والے آئیں
+        # صرف On-Process والے آئیں
         active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
         
-        # فلٹر ۲: جو ابھی ابھی سبمٹ کیے ہیں، انہیں لوکل لسٹ سے باہر نکال دیں (تاکہ وہاں کھڑے نہ رہیں)
+        # فلٹر: جو ابھی ابھی سبمٹ کیے ہیں، انہیں لوکل لائیو بورڈ کی لسٹ سے باہر نکال دیں
         if not active_df.empty:
-            active_df = active_df[~active_df['id'].isin(st.session_state.hidden_rfqs)]
+            active_df = active_df[~active_df['id'].isin(st.session_state.submitted_cache.keys())]
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
@@ -212,15 +212,22 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ کو بیک گراؤنڈ میں ریکوئسٹ بھیجیں
+                            # کلاؤڈ پر ریکوئسٹ بھیجیں
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # 🔥 جادوئی لائن: اسے لوکل ہائیڈ لسٹ میں ڈال دیں تاکہ اسکرین سے فوراً غائب ہو جائے
-                            st.session_state.hidden_rfqs.append(row_id)
+                            # 🔥 اب اسے سیشن کیشے میں ڈالیں تاکہ لائیو سے ہٹے مگر سبمٹڈ والے ٹیب میں نظر آئے
+                            st.session_state.submitted_cache[row_id] = {
+                                "id": row_id,
+                                "client_name": row['client_name'],
+                                "rfq_number": row['rfq_number'],
+                                "upload_date": row['upload_date'],
+                                "closing_date": today_date,
+                                "submitted_file": q_file_path
+                            }
                             
                             st.success("🎉 Quotation submitted successfully!")
                             
-                            # اپلوڈر کلین اپ اور اسکرین ریفریش
+                            # ری سیٹ اینڈ ری رن
                             st.session_state[f"uploader_version_{row_id}"] = current_version + 1
                             st.session_state[f"show_upload_{row_id}"] = False
                             st.rerun()
@@ -228,7 +235,60 @@ else:
                             st.error("Please attach a file first before confirming.")
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. ADD NEW RFQ
+    # 2. SUBMITTED RFQS TAB (نیا اپڈیٹڈ سیکشن)
+    elif choice == "📩 Submitted RFQs":
+        st.title("📩 Archive of Submitted Quotations")
+        
+        # کلاؤڈ شیٹ سے ڈیٹا نکالیں جن کا سٹیٹس 'Submitted' ہو چکا ہے
+        cloud_submitted = local_rfqs[local_rfqs['status'] == 'Submitted'] if not local_rfqs.empty else pd.DataFrame()
+        
+        # لوکل کیشے اور کلاؤڈ دونوں کا ڈیٹا یکجا (Merge) کریں تاکہ لائیو رپورٹ فوراً اپڈیٹ ہو
+        display_list = []
+        seen_ids = set()
+        
+        # پہلے لوکل کیشے والا ڈیٹا ڈالیں
+        for r_id, r_data in st.session_state.submitted_cache.items():
+            display_list.append(r_data)
+            seen_ids.add(r_id)
+            
+        # پھر کلاؤڈ والا ڈیٹا ڈالیں (جو لوکل میں شامل نہ ہو)
+        if not cloud_submitted.empty:
+            for index, row in cloud_submitted.iterrows():
+                c_id = str(row['id'])
+                if c_id not in seen_ids:
+                    display_list.append({
+                        "id": c_id,
+                        "client_name": row['client_name'],
+                        "rfq_number": row['rfq_number'],
+                        "upload_date": row['upload_date'],
+                        "closing_date": row['closing_date'],
+                        "submitted_file": row['submitted_file']
+                    })
+        
+        if not display_list:
+            st.info("No RFQs have been submitted yet.")
+        else:
+            for item in display_list:
+                st.markdown(f"""
+                    <div class="rfq-row rfq-submitted">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                            <div style="flex: 2;"><span class="badge-company">{item['client_name']}</span> &nbsp;&nbsp;<span class="badge-number">#{item['rfq_number']}</span> &nbsp;&nbsp;<span class='badge-status' style='background-color: #d1fae5; color: #065f46;'>✅ Submitted</span></div>
+                            <div style="flex: 1.5; color: #64748b;">📅 Recieved: {item['upload_date']}</div>
+                            <div style="flex: 1.5; color: #0f172a; font-weight: bold;">📩 Closed On: {item['closing_date']}</div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # سبمٹ کی ہوئی فائل ڈاؤن لوڈ کرنے کا بٹن
+                f_path = str(item['submitted_file'])
+                if f_path and os.path.exists(f_path):
+                    with open(f_path, "rb") as file:
+                        st.download_button(label="📥 Download Submitted Quotation", data=file, file_name=os.path.basename(f_path), key=f"dl_sub_{item['id']}")
+                else:
+                    st.caption("📄 File archived locally on server.")
+                st.markdown("<br>", unsafe_allow_html=True)
+
+    # 3. ADD NEW RFQ
     elif choice == "➕ Add New RFQ":
         st.title("➕ Create New RFQ Entry")
         selected_company = st.selectbox("🏢 Select Corporate Client", companies)
