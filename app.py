@@ -22,6 +22,8 @@ st.markdown("""
     .rfq-row:hover { transform: translateY(-2px); box-shadow: 0 12px 20px -3px rgba(15, 23, 42, 0.08); }
     .rfq-urgent { border-left: 5px solid #dc2626 !important; background-color: #fef2f2; }
     .rfq-submitted { border-left: 5px solid #10b981 !important; background-color: #f0fdf4; }
+    .rfq-won { border-left: 5px solid #059669 !important; background-color: #ecfdf5; }
+    .rfq-lost { border-left: 5px solid #94a3b8 !important; background-color: #f8fafc; }
     
     [data-testid="stSidebar"] { background-color: #0f172a !important; }
     [data-testid="stSidebar"] * { color: #f1f5f9 !important; }
@@ -54,7 +56,6 @@ SYNC_FILE = "server_sync.json"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# 🔄 گلوبال سرور ہینڈلنگ فنکشنز جو سیشن آئسولیشن ختم کریں گے
 def get_global_submitted_rfqs():
     if not os.path.exists(SYNC_FILE):
         return {}
@@ -72,6 +73,16 @@ def add_global_submission(rfq_id, rfq_data):
             json.dump(sync_data, f)
     except:
         pass
+
+def remove_global_submission(rfq_id):
+    sync_data = get_global_submitted_rfqs()
+    if str(rfq_id) in sync_data:
+        del sync_data[str(rfq_id)]
+        try:
+            with open(SYNC_FILE, "w") as f:
+                json.dump(sync_data, f)
+        except:
+            pass
 
 def get_csv_url(sheet_url, sheet_name):
     base_url = sheet_url.split('/edit')[0]
@@ -167,10 +178,20 @@ else:
         st.session_state.logged_in = False
         st.rerun()
 
-    # کلاؤڈ ڈیٹا لوڈ کریں
     local_rfqs = load_rfq_data()
-    # 🌟 گلوبل سنک فائل سے سبمٹڈ آئی ڈیز کی لسٹ نکالیں
     global_submitted = get_global_submitted_rfqs()
+
+    # 📅 GLOBAL DATE FILTER UI ON SIDEBAR
+    st.sidebar.markdown("### 📅 Filter by Upload Date")
+    from_date = st.sidebar.date_input("From Date", value=pd.to_datetime("2026-01-01"))
+    to_date = st.sidebar.date_input("To Date", value=pd.to_datetime("2026-12-31"))
+
+    def is_in_date_range(date_str):
+        try:
+            target_dt = pd.to_datetime(date_str).date()
+            return from_date <= target_dt <= to_date
+        except:
+            return True
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
@@ -181,18 +202,18 @@ else:
             if st.button("🔄 Sync Panel", use_container_width=True):
                 st.rerun()
 
-        # صرف 'on-process' والے کلاؤڈ آئٹمز فلٹر کریں
         if not local_rfqs.empty and 'status' in local_rfqs.columns:
             active_df = local_rfqs[local_rfqs['status'] == 'on-process']
         else:
             active_df = pd.DataFrame()
         
-        # 🔥 اب چاہے ایڈمن سبمٹ کرے یا کوئی بھی، گلوبل لسٹ کی بنیاد پر اسٹاف کے پاس سے بھی فوراً غائب ہوگا!
         if not active_df.empty:
             active_df = active_df[~active_df['id'].astype(str).isin(list(global_submitted.keys()))]
+            # Apply Date Filter
+            active_df = active_df[active_df['upload_date'].apply(is_in_date_range)]
         
         if active_df.empty:
-            st.info("Excellent! No pending RFQs to process.")
+            st.info("Excellent! No pending RFQs found in this date range.")
         else:
             today_str = datetime.now().strftime("%Y-%m-%d")
             for index, row in active_df.iterrows():
@@ -240,17 +261,16 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # 1. کلاؤڈ شیٹ اپڈیٹ
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # 2. 🌟 گلوبل سرور فائل میں رائٹ کریں تاکہ دوسرے اکاؤنٹس/سیشنز کو فوراً پتا چل سکے
                             submission_data = {
                                 "id": str(row_id),
                                 "client_name": row['client_name'],
                                 "rfq_number": row['rfq_number'],
                                 "upload_date": row['upload_date'],
                                 "closing_date": today_date,
-                                "submitted_file": q_file_path
+                                "submitted_file": q_file_path,
+                                "status": "submitted"
                             }
                             add_global_submission(row_id, submission_data)
                             
@@ -262,70 +282,112 @@ else:
                             st.error("Please attach a file first before confirming.")
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. SUBMITTED RFQS TAB
+    # 2. SUBMITTED RFQS TAB (WITH WIN/CLOSE ACTIONS)
     elif choice == "📩 Submitted RFQs":
-        st.title("📩 Archive of Submitted Quotations")
+        st.title("📩 Archive & Management of Quotations")
         
         if not local_rfqs.empty and 'status' in local_rfqs.columns:
-            cloud_submitted = local_rfqs[local_rfqs['status'] == 'submitted']
+            cloud_submitted = local_rfqs[local_rfqs['status'].isin(['submitted', 'won', 'lost', 'closed'])]
         else:
             cloud_submitted = pd.DataFrame()
             
         display_list = []
         seen_ids = set()
         
-        # سب سے پہلے گلوبل فائل کا ڈیٹا دکھائیں (جو فوری اور لائیو ہے)
         for r_id, r_data in global_submitted.items():
-            display_list.append(r_data)
-            seen_ids.add(str(r_id))
+            if is_in_date_range(r_data['upload_date']):
+                display_list.append(r_data)
+                seen_ids.add(str(r_id))
             
-        # پھر گوگل شیٹ کا ڈیٹا مرج کریں جو پہلے سے سبمٹڈ ہو چکے ہوں
         if not cloud_submitted.empty:
             for index, row in cloud_submitted.iterrows():
                 c_id = str(row['id'])
-                if c_id not in seen_ids:
+                if c_id not in seen_ids and is_in_date_range(row['upload_date']):
                     display_list.append({
                         "id": c_id,
                         "client_name": row['client_name'],
                         "rfq_number": row['rfq_number'],
                         "upload_date": row['upload_date'],
                         "closing_date": row['closing_date'],
-                        "submitted_file": row['submitted_file']
+                        "submitted_file": row['submitted_file'],
+                        "status": row['status']
                     })
         
         if not display_list:
-            st.info("No RFQs have been submitted yet.")
+            st.info("No records found for the selected date range.")
         else:
             for item in display_list:
+                item_status = item.get('status', 'submitted').lower()
+                
+                if item_status == "won":
+                    row_css = "rfq-won"
+                    badge = "<span class='badge-status' style='background-color: #d1fae5; color: #065f46;'>🏆 WON</span>"
+                elif item_status == "lost":
+                    row_css = "rfq-lost"
+                    badge = "<span class='badge-status' style='background-color: #f1f5f9; color: #475569;'>❌ LOST</span>"
+                elif item_status == "closed":
+                    row_css = "rfq-lost"
+                    badge = "<span class='badge-status' style='background-color: #fee2e2; color: #991b1b;'>🔒 CLOSED</span>"
+                else:
+                    row_css = "rfq-submitted"
+                    badge = "<span class='badge-status' style='background-color: #e0f2fe; color: #0369a1;'>✅ Submitted</span>"
+
                 st.markdown(f"""
-                    <div class="rfq-row rfq-submitted">
+                    <div class="rfq-row {row_css}">
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                            <div style="flex: 2;"><span class="badge-company">{item['client_name']}</span> &nbsp;&nbsp;<span class="badge-number">#{item['rfq_number']}</span> &nbsp;&nbsp;<span class='badge-status' style='background-color: #d1fae5; color: #065f46;'>✅ Submitted</span></div>
+                            <div style="flex: 2;"><span class="badge-company">{item['client_name']}</span> &nbsp;&nbsp;<span class="badge-number">#{item['rfq_number']}</span> &nbsp;&nbsp;{badge}</div>
                             <div style="flex: 1.5; color: #64748b;">📅 Recieved: {item['upload_date']}</div>
-                            <div style="flex: 1.5; color: #0f172a; font-weight: bold;">📩 Closed On: {item['closing_date']}</div>
+                            <div style="flex: 1.5; color: #0f172a; font-weight: bold;">📩 Updated On: {item['closing_date']}</div>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
                 
-                f_path = str(item['submitted_file'])
-                if f_path and os.path.exists(f_path):
-                    with open(f_path, "rb") as file:
-                        st.download_button(label="📥 Download Submitted Quotation", data=file, file_name=os.path.basename(f_path), key=f"dl_sub_{item['id']}")
-                else:
-                    st.caption("📄 File archived locally on server.")
+                col_dl, col_ops = st.columns([5, 5])
+                with col_dl:
+                    f_path = str(item['submitted_file'])
+                    if f_path and os.path.exists(f_path):
+                        with open(f_path, "rb") as file:
+                            st.download_button(label="📥 Download Quotation", data=file, file_name=os.path.basename(f_path), key=f"dl_sub_{item['id']}")
+                    else:
+                        st.caption("📄 File archived on server.")
+                
+                with col_ops:
+                    if st.session_state.role == "Admin" and item_status == "submitted":
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            if st.button("🏆 Win", key=f"win_{item['id']}", use_container_width=True):
+                                update_rfq_status_on_cloud(item['id'], "Won", datetime.now().strftime("%Y-%m-%d"), item['submitted_file'])
+                                remove_global_submission(item['id'])
+                                st.success("Marked as WON")
+                                st.rerun()
+                        with c2:
+                            if st.button("❌ Lost", key=f"lost_{item['id']}", use_container_width=True):
+                                update_rfq_status_on_cloud(item['id'], "Lost", datetime.now().strftime("%Y-%m-%d"), item['submitted_file'])
+                                remove_global_submission(item['id'])
+                                st.success("Marked as LOST")
+                                st.rerun()
+                        with c3:
+                            if st.button("🔒 Close", key=f"close_{item['id']}", use_container_width=True):
+                                update_rfq_status_on_cloud(item['id'], "Closed", datetime.now().strftime("%Y-%m-%d"), item['submitted_file'])
+                                remove_global_submission(item['id'])
+                                st.success("Marked as CLOSED")
+                                st.rerun()
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 3. ADD NEW RFQ
+    # 3. ADD NEW RFQ (🛑 WITH DUPLICATE REF CHECK FITTED)
     elif choice == "➕ Add New RFQ":
         st.title("➕ Create New RFQ Entry")
         selected_company = st.selectbox("🏢 Select Corporate Client", companies)
-        rfq_num = st.text_input("📝 RFQ Reference / Number")
+        rfq_num = st.text_input("📝 RFQ Reference / Number").strip()
         last_dt = st.date_input("📅 Submission Deadline")
         uploaded_files = st.file_uploader("📎 Drop Documents here", accept_multiple_files=True)
         
         if st.button("🚀 Push to Cloud Dashboard", type="primary"):
-            if not rfq_num.strip():
+            if not rfq_num:
                 st.error("RFQ number cannot be empty.")
+            # 🛑 ڈپلیکیٹ کلاؤڈ چیک: اگر یہ نمبر پہلے سے موجود ہے تو ایرر دے گا
+            elif not local_rfqs.empty and 'rfq_number' in local_rfqs.columns and rfq_num in local_rfqs['rfq_number'].astype(str).str.strip().values:
+                st.error(f"⚠️ RFQ Number '#{rfq_num}' پہلے سے سسٹم میں موجود ہے! براہ کرم نیا یا یونیک نمبر درج کریں۔")
             else:
                 new_id = str(int(datetime.now().timestamp()))
                 upload_date = datetime.now().strftime("%Y-%m-%d")
