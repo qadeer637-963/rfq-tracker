@@ -81,6 +81,22 @@ def save_to_google_sheet(sheet_name, row_data):
     except:
         return False
 
+def update_rfq_status_on_cloud(rfq_id, status, closing_date, submitted_file):
+    try:
+        # کلاؤڈ ایپ اسکرپٹ کو اپڈیٹ بھیجنے کے لیے پے لوڈ
+        payload = {
+            'action': 'update_status',
+            'sheet': SHEET_NAME_RFQS,
+            'id': str(rfq_id),
+            'status': status,
+            'closing_date': closing_date,
+            'submitted_file': submitted_file
+        }
+        response = requests.post(APPS_SCRIPT_URL, params=payload)
+        return response.text == "Success"
+    except:
+        return False
+
 CREDENTIALS = {
     "admin": {"password": "qadeer963", "role": "Admin"},
     "staff": {"password": "staff963", "role": "User"}
@@ -172,7 +188,6 @@ else:
                         st.session_state[f"show_upload_{row_id}"] = True
 
                 if st.session_state.get(f"show_upload_{row_id}", False):
-                    # یہاں اسٹرنگ بالکل صاف کر دی گئی ہے تاکہ سنٹیکس کنفیوژن نہ ہو
                     current_version = st.session_state.get(f"uploader_version_{row_id}", 0)
                     uploader_key = f"file_uploader_{row_id}_{current_version}"
                     
@@ -180,12 +195,19 @@ else:
                     
                     if st.button("Confirm & Save Submission", key=f"conf_sub_{row_id}", type="primary"):
                         if q_file:
-                            q_file_path = os.path.join(UPLOAD_DIR, f"SUBMITTED_{row['rfq_number']}_{q_file.name}")
+                            q_file_name = f"SUBMITTED_{row['rfq_number']}_{q_file.name}"
+                            q_file_path = os.path.join(UPLOAD_DIR, q_file_name)
                             with open(q_file_path, "wb") as f: f.write(q_file.getbuffer())
                             
-                            st.success("🎉 Quotation file saved successfully!")
+                            today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # ورژن بڑھا کر اپلوڈر کو ری سیٹ کریں
+                            # کلاؤڈ شیٹ پر سٹیٹس تبدیل کر کے "Submitted" کریں تاکہ یہ لائیو بورڈ سے ہٹ جائے
+                            with st.spinner("Updating Cloud Dashboard..."):
+                                cloud_sync = update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
+                            
+                            st.success("🎉 Quotation submitted and Live Dashboard updated!")
+                            
+                            # اپلوڈر ری سیٹ کریں اور اسکرین ریفریش کریں
                             st.session_state[f"uploader_version_{row_id}"] = current_version + 1
                             st.session_state[f"show_upload_{row_id}"] = False
                             st.rerun()
