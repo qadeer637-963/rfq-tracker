@@ -83,7 +83,6 @@ def save_to_google_sheet(sheet_name, row_data):
 
 def update_rfq_status_on_cloud(rfq_id, status, closing_date, submitted_file):
     try:
-        # کلاؤڈ ایپ اسکرپٹ کو اپڈیٹ بھیجنے کے لیے پے لوڈ
         payload = {
             'action': 'update_status',
             'sheet': SHEET_NAME_RFQS,
@@ -102,10 +101,15 @@ CREDENTIALS = {
     "staff": {"password": "staff963", "role": "User"}
 }
 
+# سیشن اسٹیٹس ہینڈلنگ
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.session_state.role = ""
+
+# 🛠️ سبمٹڈ آئیڈیز کو لوکل چھپانے کے لیے لسٹ
+if "hidden_rfqs" not in st.session_state:
+    st.session_state.hidden_rfqs = []
 
 # ڈیٹا لائیو لوڈنگ
 local_rfqs = load_rfq_data()
@@ -145,12 +149,19 @@ else:
     
     if st.sidebar.button("🔒 Secure Logout", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
+        st.session_state.hidden_rfqs = []  # لاگ آؤٹ پر ہسٹری صاف کریں
         st.rerun()
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
         st.title("📊 Live RFQ Monitor (Pending Only)")
+        
+        # فلٹر ۱: صرف On-Process والے آئیں
         active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
+        
+        # فلٹر ۲: جو ابھی ابھی سبمٹ کیے ہیں، انہیں لوکل لسٹ سے باہر نکال دیں (تاکہ وہاں کھڑے نہ رہیں)
+        if not active_df.empty:
+            active_df = active_df[~active_df['id'].isin(st.session_state.hidden_rfqs)]
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
@@ -201,13 +212,15 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ شیٹ پر سٹیٹس تبدیل کر کے "Submitted" کریں تاکہ یہ لائیو بورڈ سے ہٹ جائے
-                            with st.spinner("Updating Cloud Dashboard..."):
-                                cloud_sync = update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
+                            # کلاؤڈ کو بیک گراؤنڈ میں ریکوئسٹ بھیجیں
+                            update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            st.success("🎉 Quotation submitted and Live Dashboard updated!")
+                            # 🔥 جادوئی لائن: اسے لوکل ہائیڈ لسٹ میں ڈال دیں تاکہ اسکرین سے فوراً غائب ہو جائے
+                            st.session_state.hidden_rfqs.append(row_id)
                             
-                            # اپلوڈر ری سیٹ کریں اور اسکرین ریفریش کریں
+                            st.success("🎉 Quotation submitted successfully!")
+                            
+                            # اپلوڈر کلین اپ اور اسکرین ریفریش
                             st.session_state[f"uploader_version_{row_id}"] = current_version + 1
                             st.session_state[f"show_upload_{row_id}"] = False
                             st.rerun()
