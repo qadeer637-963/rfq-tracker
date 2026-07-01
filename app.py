@@ -93,6 +93,9 @@ def load_rfq_data():
     try:
         df = pd.read_csv(csv_url)
         df['id'] = df['id'].astype(str)
+        # RFQ نمبر کو سٹرنگ بنا کر کلین کرنا تاکہ میچنگ میں مسئلہ نہ ہو
+        if 'rfq_number' in df.columns:
+            df['rfq_number'] = df['rfq_number'].astype(str).str.strip()
         if 'status' in df.columns:
             df['status'] = df['status'].astype(str).str.strip().str.lower()
         return df.fillna("")
@@ -374,7 +377,7 @@ else:
                                 st.rerun()
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 3. ADD NEW RFQ (🛑 WITH DUPLICATE REF CHECK FITTED)
+    # 3. ADD NEW RFQ (⚡ مکمل فکسڈ ڈپلیکیٹ چیکر)
     elif choice == "➕ Add New RFQ":
         st.title("➕ Create New RFQ Entry")
         selected_company = st.selectbox("🏢 Select Corporate Client", companies)
@@ -385,26 +388,37 @@ else:
         if st.button("🚀 Push to Cloud Dashboard", type="primary"):
             if not rfq_num:
                 st.error("RFQ number cannot be empty.")
-            # 🛑 ڈپلیکیٹ کلاؤڈ چیک: اگر یہ نمبر پہلے سے موجود ہے تو ایرر دے گا
-            elif not local_rfqs.empty and 'rfq_number' in local_rfqs.columns and rfq_num in local_rfqs['rfq_number'].astype(str).str.strip().values:
-                st.error(f"⚠️ RFQ Number '#{rfq_num}' پہلے سے سسٹم میں موجود ہے! براہ کرم نیا یا یونیک نمبر درج کریں۔")
             else:
-                new_id = str(int(datetime.now().timestamp()))
-                upload_date = datetime.now().strftime("%Y-%m-%d")
-                saved_paths = []
-                if uploaded_files:
-                    for idx, f_obj in enumerate(uploaded_files):
-                        f_path = os.path.join(UPLOAD_DIR, f"{rfq_num}_{idx}_{f_obj.name}")
-                        with open(f_path, "wb") as f: f.write(f_obj.getbuffer())
-                        saved_paths.append(f_path)
+                # 🛠️ سپر کلین چیک: کلاؤڈ اور لوکل لسٹ دونوں میں موجود تمام RFQ نمبرز کو سٹرنگ لسٹ میں لانا
+                cloud_rfq_numbers = []
+                if not local_rfqs.empty and 'rfq_number' in local_rfqs.columns:
+                    cloud_rfq_numbers = [str(x).strip() for x in local_rfqs['rfq_number'].tolist()]
                 
-                new_row = [new_id, upload_date, selected_company, rfq_num, str(last_dt), json.dumps(saved_paths), "On-Process", "", ""]
+                global_rfq_numbers = [str(data['rfq_number']).strip() for data in global_submitted.values()]
                 
-                if save_to_google_sheet(SHEET_NAME_RFQS, new_row):
-                    st.success("🎉 RFQ Successfully pushed to live Google Sheet!")
-                    st.rerun()
+                # دونوں لسٹوں کو آپس میں ملا کر ایک کر دیا
+                all_existing_rfqs = set(cloud_rfq_numbers + global_rfq_numbers)
+                
+                # حتمی چیکنگ
+                if rfq_num in all_existing_rfqs:
+                    st.error(f"⚠️ RFQ Number '#{rfq_num}' پہلے سے سسٹم میں موجود ہے! براہ کرم نیا یا یونیک نمبر درج کریں۔")
                 else:
-                    st.error("Cloud sync failed. Please check headers or Apps Script.")
+                    new_id = str(int(datetime.now().timestamp()))
+                    upload_date = datetime.now().strftime("%Y-%m-%d")
+                    saved_paths = []
+                    if uploaded_files:
+                        for idx, f_obj in enumerate(uploaded_files):
+                            f_path = os.path.join(UPLOAD_DIR, f"{rfq_num}_{idx}_{f_obj.name}")
+                            with open(f_path, "wb") as f: f.write(f_obj.getbuffer())
+                            saved_paths.append(f_path)
+                    
+                    new_row = [new_id, upload_date, selected_company, rfq_num, str(last_dt), json.dumps(saved_paths), "On-Process", "", ""]
+                    
+                    if save_to_google_sheet(SHEET_NAME_RFQS, new_row):
+                        st.success("🎉 RFQ Successfully pushed to live Google Sheet!")
+                        st.rerun()
+                    else:
+                        st.error("Cloud sync failed. Please check headers or Apps Script.")
 
     # 4. MANAGE COMPANIES
     elif choice == "🏢 Manage Companies" and st.session_state.role == "Admin":
