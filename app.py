@@ -59,6 +59,7 @@ def get_csv_url(sheet_url, sheet_name):
 def load_rfq_data():
     csv_url = get_csv_url(GOOGLE_SHEET_URL, SHEET_NAME_RFQS)
     try:
+        # فوراً نیا ڈیٹا لانے کے لیے ٹائم اسٹیمپ کا استعمال
         df = pd.read_csv(f"{csv_url}&nocache={datetime.now().timestamp()}")
         df['id'] = df['id'].astype(str)
         return df.fillna("")
@@ -107,12 +108,11 @@ if "logged_in" not in st.session_state:
     st.session_state.username = ""
     st.session_state.role = ""
 
-# 🛠️ لائیو بورڈ سے ہٹائے گئے اور سبمٹ کیے گئے آئٹمز کو لوکل سیشن میں رکھنے کے لیے ڈکشنری
+# لائیو بورڈ فلٹر کیشے
 if "submitted_cache" not in st.session_state:
     st.session_state.submitted_cache = {}
 
-# ڈیٹا لائیو لوڈنگ
-local_rfqs = load_rfq_data()
+# 🔥 ڈیٹا لوڈنگ اب لائیو فنکشن کے ذریعے نیچے ہوگی تاکہ ایڈمن ایکشن کے بعد پرانا ڈیٹا نہ دیکھے
 companies = load_client_data()
 
 # Login Screen
@@ -149,17 +149,20 @@ else:
     
     if st.sidebar.button("🔒 Secure Logout", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.submitted_cache = {}  # لاگ آؤٹ پر ہسٹری صاف کریں
+        st.session_state.submitted_cache = {}
         st.rerun()
+
+    # ہر ٹیب کے رن ہونے پر کلاؤڈ سے تازہ ڈیٹا اٹھائیں تاکہ ایڈمن کی تبدیلیاں فوراً لاگو ہوں
+    local_rfqs = load_rfq_data()
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
         st.title("📊 Live RFQ Monitor (Pending Only)")
         
-        # صرف On-Process والے آئیں
+        # صرف On-Process والی کوٹیشنز فلٹر کریں
         active_df = local_rfqs[local_rfqs['status'] == 'On-Process'] if not local_rfqs.empty else pd.DataFrame()
         
-        # فلٹر: جو ابھی ابھی سبمٹ کیے ہیں، انہیں لوکل لائیو بورڈ کی لسٹ سے باہر نکال دیں
+        # سیشن کیشے کی بنیاد پر بھی سختی سے فلٹر کریں
         if not active_df.empty:
             active_df = active_df[~active_df['id'].isin(st.session_state.submitted_cache.keys())]
         
@@ -212,10 +215,10 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ پر ریکوئسٹ بھیجیں
+                            # کلاؤڈ اپڈیٹ
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # 🔥 اب اسے سیشن کیشے میں ڈالیں تاکہ لائیو سے ہٹے مگر سبمٹڈ والے ٹیب میں نظر آئے
+                            # کیشے میں سیو کریں فوراً ریموو کرنے کے لیے
                             st.session_state.submitted_cache[row_id] = {
                                 "id": row_id,
                                 "client_name": row['client_name'],
@@ -226,8 +229,6 @@ else:
                             }
                             
                             st.success("🎉 Quotation submitted successfully!")
-                            
-                            # ری سیٹ اینڈ ری رن
                             st.session_state[f"uploader_version_{row_id}"] = current_version + 1
                             st.session_state[f"show_upload_{row_id}"] = False
                             st.rerun()
@@ -235,23 +236,18 @@ else:
                             st.error("Please attach a file first before confirming.")
                 st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. SUBMITTED RFQS TAB (نیا اپڈیٹڈ سیکشن)
+    # 2. SUBMITTED RFQS TAB
     elif choice == "📩 Submitted RFQs":
         st.title("📩 Archive of Submitted Quotations")
         
-        # کلاؤڈ شیٹ سے ڈیٹا نکالیں جن کا سٹیٹس 'Submitted' ہو چکا ہے
         cloud_submitted = local_rfqs[local_rfqs['status'] == 'Submitted'] if not local_rfqs.empty else pd.DataFrame()
-        
-        # لوکل کیشے اور کلاؤڈ دونوں کا ڈیٹا یکجا (Merge) کریں تاکہ لائیو رپورٹ فوراً اپڈیٹ ہو
         display_list = []
         seen_ids = set()
         
-        # پہلے لوکل کیشے والا ڈیٹا ڈالیں
         for r_id, r_data in st.session_state.submitted_cache.items():
             display_list.append(r_data)
             seen_ids.add(r_id)
             
-        # پھر کلاؤڈ والا ڈیٹا ڈالیں (جو لوکل میں شامل نہ ہو)
         if not cloud_submitted.empty:
             for index, row in cloud_submitted.iterrows():
                 c_id = str(row['id'])
@@ -279,7 +275,6 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # سبمٹ کی ہوئی فائل ڈاؤن لوڈ کرنے کا بٹن
                 f_path = str(item['submitted_file'])
                 if f_path and os.path.exists(f_path):
                     with open(f_path, "rb") as file:
@@ -315,7 +310,7 @@ else:
                     st.success("🎉 RFQ Successfully pushed to live Google Sheet!")
                     st.rerun()
                 else:
-                    st.error("Cloud sync failed. Please check your Google Sheet column headers or Apps Script Deployments.")
+                    st.error("Cloud sync failed. Please check headers or Apps Script.")
 
     # 4. MANAGE COMPANIES
     elif choice == "🏢 Manage Companies" and st.session_state.role == "Admin":
@@ -338,4 +333,4 @@ else:
                         st.success(f"'{new_comp_name}' successfully added to Google Sheet!")
                         st.rerun()
                     else:
-                        st.error("Failed to add company to Cloud. Please make sure Row 1 of Sheet2 has a column header (e.g., 'name').")
+                        st.error("Failed to add company to Cloud.")
