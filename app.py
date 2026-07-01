@@ -49,12 +49,32 @@ SHEET_NAME_RFQS = "Sheet1"
 SHEET_NAME_CLIENTS = "Sheet2"
 
 UPLOAD_DIR = "uploaded_rfqs"
+SYNC_FILE = "server_sync.json"
+
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
+# 🔄 گلوبال سرور ہینڈلنگ فنکشنز جو سیشن آئسولیشن ختم کریں گے
+def get_global_submitted_rfqs():
+    if not os.path.exists(SYNC_FILE):
+        return {}
+    try:
+        with open(SYNC_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def add_global_submission(rfq_id, rfq_data):
+    sync_data = get_global_submitted_rfqs()
+    sync_data[str(rfq_id)] = rfq_data
+    try:
+        with open(SYNC_FILE, "w") as f:
+            json.dump(sync_data, f)
+    except:
+        pass
+
 def get_csv_url(sheet_url, sheet_name):
     base_url = sheet_url.split('/edit')[0]
-    # گوگل کیشے بائی پاس کرنے کے لیے لائیو سیکنڈز کا رینڈم نمبر لگانا لازمی ہے
     return f"{base_url}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(datetime.now().timestamp())}"
 
 def load_rfq_data():
@@ -62,7 +82,6 @@ def load_rfq_data():
     try:
         df = pd.read_csv(csv_url)
         df['id'] = df['id'].astype(str)
-        # سٹیٹس کالم کو صاف ستھرا کریں تاکہ میچنگ لائیو اور پکی ہو
         if 'status' in df.columns:
             df['status'] = df['status'].astype(str).str.strip().str.lower()
         return df.fillna("")
@@ -110,9 +129,6 @@ if "logged_in" not in st.session_state:
     st.session_state.username = ""
     st.session_state.role = ""
 
-if "submitted_cache" not in st.session_state:
-    st.session_state.submitted_cache = {}
-
 companies = load_client_data()
 
 # Login Screen
@@ -149,11 +165,12 @@ else:
     
     if st.sidebar.button("🔒 Secure Logout", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.submitted_cache = {}
         st.rerun()
 
-    # کلاؤڈ ڈیٹا لوڈنگ
+    # کلاؤڈ ڈیٹا لوڈ کریں
     local_rfqs = load_rfq_data()
+    # 🌟 گلوبل سنک فائل سے سبمٹڈ آئی ڈیز کی لسٹ نکالیں
+    global_submitted = get_global_submitted_rfqs()
 
     # 1. LIVE DASHBOARD
     if choice == "📊 Live Dashboard":
@@ -161,19 +178,18 @@ else:
         with col_title:
             st.title("📊 Live RFQ Monitor (Pending Only)")
         with col_ref:
-            # 🔄 دوسرے سیشن کی لائیو تبدیلی دیکھنے کے لیے مینیو ریفریش بٹن
-            if st.button("🔄 Sync Cloud", use_container_width=True):
+            if st.button("🔄 Sync Panel", use_container_width=True):
                 st.rerun()
 
-        # صرف 'on-process' اسٹیٹس والی کوٹیشنز فلٹر کریں
+        # صرف 'on-process' والے کلاؤڈ آئٹمز فلٹر کریں
         if not local_rfqs.empty and 'status' in local_rfqs.columns:
             active_df = local_rfqs[local_rfqs['status'] == 'on-process']
         else:
             active_df = pd.DataFrame()
         
-        # لوکل سیشن فلٹر (جس اکاؤنٹ سے سبمٹ ہو رہی ہے وہاں سے فوراً غائب کرنے کے لیے)
+        # 🔥 اب چاہے ایڈمن سبمٹ کرے یا کوئی بھی، گلوبل لسٹ کی بنیاد پر اسٹاف کے پاس سے بھی فوراً غائب ہوگا!
         if not active_df.empty:
-            active_df = active_df[~active_df['id'].astype(str).isin([str(k) for k in st.session_state.submitted_cache.keys()])]
+            active_df = active_df[~active_df['id'].astype(str).isin(list(global_submitted.keys()))]
         
         if active_df.empty:
             st.info("Excellent! No pending RFQs to process.")
@@ -224,11 +240,11 @@ else:
                             
                             today_date = datetime.now().strftime("%Y-%m-%d")
                             
-                            # کلاؤڈ شیٹ اپڈیٹ (یہاں سٹیٹس کو بالکل صاف 'Submitted' بھیج رہے ہیں)
+                            # 1. کلاؤڈ شیٹ اپڈیٹ
                             update_rfq_status_on_cloud(row_id, "Submitted", today_date, q_file_path)
                             
-                            # کرنٹ سیشن کیشے ہینڈلنگ
-                            st.session_state.submitted_cache[str(row_id)] = {
+                            # 2. 🌟 گلوبل سرور فائل میں رائٹ کریں تاکہ دوسرے اکاؤنٹس/سیشنز کو فوراً پتا چل سکے
+                            submission_data = {
                                 "id": str(row_id),
                                 "client_name": row['client_name'],
                                 "rfq_number": row['rfq_number'],
@@ -236,6 +252,7 @@ else:
                                 "closing_date": today_date,
                                 "submitted_file": q_file_path
                             }
+                            add_global_submission(row_id, submission_data)
                             
                             st.success("🎉 Quotation submitted successfully!")
                             st.session_state[f"uploader_version_{row_id}"] = current_version + 1
@@ -257,12 +274,12 @@ else:
         display_list = []
         seen_ids = set()
         
-        # کرنٹ سیشن ڈیٹا مرجنگ
-        for r_id, r_data in st.session_state.submitted_cache.items():
+        # سب سے پہلے گلوبل فائل کا ڈیٹا دکھائیں (جو فوری اور لائیو ہے)
+        for r_id, r_data in global_submitted.items():
             display_list.append(r_data)
             seen_ids.add(str(r_id))
             
-        # کلاؤڈ لائیو ڈیٹا مرجنگ
+        # پھر گوگل شیٹ کا ڈیٹا مرج کریں جو پہلے سے سبمٹڈ ہو چکے ہوں
         if not cloud_submitted.empty:
             for index, row in cloud_submitted.iterrows():
                 c_id = str(row['id'])
